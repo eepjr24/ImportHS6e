@@ -3,8 +3,8 @@
 Name			:	ImportHS6e
 GitHub			:	https://github.com/eepjr24/ImportHS6e
 Roll20 Contact	:	eepjr24
-Version			:	.912
-Last Update		:	4/7/2021
+Version			:	.913
+Last Update		:	4/11/2021
 =========================================================
 */
 var API_Meta = API_Meta || {};
@@ -15,8 +15,8 @@ API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
 
 const ImportHS6e = (() => {
 
-  let version = '0.912',
-  lastUpdate  = 1617318109912,
+  let version = '0.913',
+  lastUpdate  = 1618165680913,
   lastBody    = 0,
   debug_log   = 0,
   logObjs     = 0;
@@ -82,27 +82,30 @@ const ImportHS6e = (() => {
       compnm = "Acc Chg: " + desc + ", " + ad1 + ", " + ad2;
       break;
     case "DEPENDENCE":                                                         // Dependence
-      // TODO: Build complications
       compnm = "Dep: " + desc + ", " + ad1 + " / " + ad3 + ", " + ad2;
       break;
     case "DEPENDENTNPC":                                                       // Dependent NPC
-      // TODO: Build complications
       compnm = "DNPC: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
       break;
     case "DISTINCTIVEFEATURES":                                                // Distinctive Features
-      // TODO: Build complications
       compnm = "DF: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
       break;
     case "ENRAGED":                                                            // Enraged
-      // TODO: Build complications
       compnm = "Enraged: " + desc + ", " + ad2 + ", " + ad3 + ", " + ad1 ;
       break;
     case "HUNTED":                                                             // Hunted
-      // TODO: Build complications
       compnm = "Hunted: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
       break;
+    case "PHYSICALLIMITATION":                                                 // Physical Complication
+      compnm = "Phys Comp: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
+      break;
+    case "PSYCHOLOGICALLIMITATION":                                            // Psychological Complication
+      compnm = "Psy Comp: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
+      break;
+    case "SOCIALLIMITATION":                                                   // Social Complication
+      compnm = "Soc Comp: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
+      break;
     case "REPUTATION":                                                         // Negative Reputation
-      // TODO: Build complications
       compnm = "Neg Rep: " + desc + ", " + ad1 + ", " + ad2 + ", " + ad3;
       break;
     case "UNLUCK":                                                             // Unluck
@@ -113,11 +116,25 @@ const ImportHS6e = (() => {
       return sendChat("API", "Unhandled complication type: " + type);
       break;
     }
+    compnm = compnm.replace(/[,\s]+$/g, '')                                    // Trim trailing comma and space as needed
+                   .replace('Uncommon', 'Unc')                                 // Abbreviate Uncommon
+                   .replace('Common', 'Com')                                   // Abbreviate Common
+                   .replace('Very Common', 'VC')                               // Abbreviate Very Common
+                   .replace('As Powerful', 'AsPow')                            // Abbreviate As Powerful
+                   .replace('More Powerful', 'MoPow')                          // Abbreviate More Powerful
+                   .replace('Less Powerful', 'LessPow')                        // Abbreviate Less Powerful
+                   .replace('Strong', 'Str')                                   // Abbreviate Strong
+                   .replace('Total', 'Tot')                                    // Abbreviate Total
+                   .replace('Frequently', 'Freq')                              // Abbreviate Frequent
+                   .replace('Infrequently', 'Infreq')                          // Abbreviate Infrequent
+                   .replace('Moderate', 'Mod')                                 // Abbreviate Moderate
+                   .replace('Major', 'Maj')                                    // Abbreviate Major
+                   .replace('Slightly', 'Slight')                              // Abbreviate Slightly
     createObj('attribute', {name: rcnm, current: compnm, characterid: cid});   // Assign the complication cost
     return;
   };
 
-  const createSimplePower = (type, pwnm, desc, ap, end, uuid, cid) => {
+  const createSimplePower = (pwjson, uuid, cid) => {
 /*
 {"name":"repeating_powers_-MXhluZfmICeVLgVIyiV_power_name","current":"Blast Gauntlet","max":"","_id":"-MXhlz3DIliBttlOoThs","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
 {"name":"repeating_powers_-MXhluZfmICeVLgVIyiV_use_power_formula","current":"&{template:hero6template} {{charname=@{character_name}}} {{power=Blast Gauntlet}}  {{base=7}} {{ocv=7}} {{attack=[[3d6]]}} {{damage=[[10d6]]}} {{type=STUN}} {{count=BODY}}","max":"","_id":"-MXhlz5Icl8SXtShrL13","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
@@ -202,8 +219,11 @@ const ImportHS6e = (() => {
 	{"name":"No Name Supplied","uid":1616806581324,"type":"Leaping","damage":"","range":"","input":"","level":"12","end":"1","active":"6","base":"6","XMLID":"LEAPING","strMod":false,"class":{"attack":false,"mental":false,"adjustment":false,"bodyaffecting":false,"sensory":false,"move":true,"defense":false,"compound":false,"senseaffecting":false,"special":false},"modifiers":[],"adders":[]},
 	{"name":"No Name Supplied","uid":1616806603052,"type":"Knockback Resistance","damage":"-4m","range":"","input":"","level":"4","end":"0","active":"4","base":"4","XMLID":"KBRESISTANCE","strMod":false,"class":{"attack":false,"mental":false,"adjustment":false,"bodyaffecting":false,"sensory":false,"move":false,"defense":true,"compound":false,"senseaffecting":false,"special":true},"modifiers":[],"adders":[]}],
 */
-
-    let rppre = "repeating_powers_" + uuid,                                    // Build the string prefix for powers
+    let pwtype = '',
+        pwnm   = '',
+        pwdesc = '',
+        hclas  = pwjson.class,
+        rppre = "repeating_powers_" + uuid,                                    // Build the string prefix for powers
         rpnm  = rppre + "_power_name",                                         // Build the power name value
         rppf  = rppre + "_use_power_formula",                                  // Build the power formula
         rppf2 = rppre + "_use_power2_formula",                                 // Build the 2nd power formula
@@ -212,15 +232,60 @@ const ImportHS6e = (() => {
         rpes  = rppre + "_power_end_str_cost",                                 // Build the power str end cost
         rprc  = rppre + "_power_remaining_charges",                            // Build the power remaining charges / end
         zero  = 0;
+
+    if (hclas.attack)              {pwtype = "attack";}                        // Determine power type
+    else if (hclas.mental)         {pwtype = "mental";}
+    else if (hclas.adjustment)     {pwtype = "adjustment";}
+    else if (hclas.bodyaffecting)  {pwtype = "bodyaffecting";}
+    else if (hclas.sensory)        {pwtype = "sensory";}
+    else if (hclas.move)           {pwtype = "move";}
+    else if (hclas.defense)        {pwtype = "defense";}
+    else if (hclas.compound)       {pwtype = "compound";}
+    else if (hclas.senseaffecting) {pwtype = "senseaffecting";}
+    else if (hclas.special)        {pwtype = "special";}
+    else                           {pwtype = "unknown";}
+
+    if (pwjson.name.trim() === "No Name Supplied")
+    {
+      pwnm = pwjson.type.trim();
+    } else
+	{
+      pwnm = pwjson.name.trim();
+	}
+
+    if (isNaN(pwjson.end))
+    {
+    // TODO implement powers with charges
+      sendChat("API", "Powers with charges not implemented yet: " + pwnm);
+      return;
+    } else if (pwtype === "attack")
+    {
+    // TODO implement attack powers
+      sendChat("API", "Attack powers not implemented yet: " + pwnm);
+      return;
+    } else if (pwtype === "unknown")
+    {
+      sendChat("API", "Power is an unknown type: " + pwnm);
+      return;
+    }
+
+    pwdesc = pwjson.damage + " " + pwjson.type;
+    logDebug(pwdesc);
+    logDebug(pwjson.active);
+    logDebug(pwjson.end);
+    logDebug(uuid);
+    logDebug(cid);
+
     // Create the power entries.
     createObj('attribute', {name: rpnm, current: pwnm, characterid: cid});
     createObj('attribute', {name: rppf, current: "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} ", characterid: cid});
-    createObj('attribute', {name: rppf2, current: "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} {{description=" + desc + "}}", characterid: cid});
-    createObj('attribute', {name: rpec, current: end, characterid: cid});
-    createObj('attribute', {name: rpea, current: parseInt(end), characterid: cid});
+//                                     "current":"&{template:hero6template} {{charname=@{character_name}}} {{power=Memory Theft O}}  {{ocv=6}} {{attack=[[3d6]]}} {{damage=[[15d6]]}} {{type=Effect}}","max":"","_id":"-MY0uNetuKuCmrT3SpgR","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
+    createObj('attribute', {name: rppf2, current: "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} {{description=" + pwdesc + "}}", characterid: cid});
+//                                      "current":"&{template:hero6template} {{charname=@{character_name}}} {{power=Memory Theft O}}  {{ocv=6}} {{attack=[[3d6]]}} {{damage=[[15d6]]}} {{type=Effect}}{{description=This is the power Memory Theft}}","max":"","_id":"-MY0uNetuKuCmrT3SpgS","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
+    createObj('attribute', {name: rpec, current: pwjson.end, characterid: cid});
+    createObj('attribute', {name: rpea, current: parseInt(pwjson.end), characterid: cid});
     createObj('attribute', {name: rpes, current: zero, characterid: cid});
-    createObj('attribute', {name: rprc, current: end, characterid: cid});
-
+    createObj('attribute', {name: rprc, current: pwjson.end, characterid: cid});
 
     return;
   };
@@ -383,6 +448,8 @@ const ImportHS6e = (() => {
 //{"name":"weight","current":"200","max":"","_id":"-MWM-LBbkWVEVoxsB3Hb","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
 //{"name":"eyes","current":"Brown","max":"","_id":"-MWM-MBB1Ix8iKBR8wKL","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
 //{"name":"gender","current":"Male","max":"","_id":"-MWM-O_ZCwYJ05LUkp-U","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
+      createOrSetAttr("name", "name", hdJSON.name, character.id);
+
 //        logDebug("Features Assigned");
 
       var hdsklist = hdJSON.skills;                                            // Create array of all HD Skills.
@@ -448,60 +515,10 @@ const ImportHS6e = (() => {
       // Create all powers
       for (var h=0; h < hdpwlist.length; h++)                                  // Loop through HD sheet powers
       {
-        let pwtype = '',
-            pwname = '',
-            pwdesc = '',
-            hclas  = hdpwlist[h].class,
-            UUID   = generateUUID().replace(/_/g, "Z");                        // Generate a UUID for power grouping
-
-        logDebug(hclas);
-
-        if (hclas.attack)              {pwtype = "attack";}                    // Determine power type
-        else if (hclas.mental)         {pwtype = "mental";}
-        else if (hclas.adjustment)     {pwtype = "adjustment";}
-        else if (hclas.bodyaffecting)  {pwtype = "bodyaffecting";}
-        else if (hclas.sensory)        {pwtype = "sensory";}
-        else if (hclas.move)           {pwtype = "move";}
-        else if (hclas.defense)        {pwtype = "defense";}
-        else if (hclas.compound)       {pwtype = "compound";}
-        else if (hclas.senseaffecting) {pwtype = "senseaffecting";}
-        else if (hclas.special)        {pwtype = "special";}
-        else {pwtype = "unknown";}
-
-        if (hdpwlist[h].name.trim() === "No Name Supplied")
-        {
-          pwname = hdpwlist[h].type.trim()
-		} else
-		{
-          pwname = hdpwlist[h].name.trim()
-		}
-        logDebug(pwtype);
-        logDebug(pwname);
-        logDebug(pwdesc);
-        logDebug(hdpwlist[h].active);
-        logDebug(hdpwlist[h].end);
-        logDebug(UUID);
-        logDebug(chid);
-
-        // Create all entries needed for a power
-        if (isNaN(hdpwlist[h].end))
-        // Power has charges
-        {
-          // TODO implement powers with charges
-          sendChat("API", "Powers with charges not implemented yet: " + pwname);
-		} else if (pwtype === "attack")
-		// Power is an attack
-		{
-          // TODO implement attack powers
-          sendChat("API", "Attack powers not implemented yet: " + pwname);
-		} else if (pwtype === "unknown")
-		// Power is unknown type
-		{
-          sendChat("API", "Power is an unknown type: " + pwname);
-		} else
-		{
-          createSimplePower(pwtype, pwname, pwdesc, hdpwlist[h].active, hdpwlist[h].end, UUID, chid);
-		}
+        UUID   = generateUUID().replace(/_/g, "Z");                            // Generate a UUID for power grouping
+//          createSimplePower(pwtype, pwname, pwdesc, hdpwlist[h].active, hdpwlist[h].end, UUID, chid);
+          createSimplePower(hdpwlist[h], UUID, chid);
+//		}
       }
 
       logDebug("Powers Assigned");
