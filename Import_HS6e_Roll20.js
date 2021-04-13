@@ -1,10 +1,10 @@
 /*
 =========================================================
-Name			:	ImportHS6e
-GitHub			:	https://github.com/eepjr24/ImportHS6e
+Name		:	ImportHS6e
+GitHub		:	https://github.com/eepjr24/ImportHS6e
 Roll20 Contact	:	eepjr24
-Version			:	.913
-Last Update		:	4/11/2021
+Version		:	.914
+Last Update	:	4/12/2021
 =========================================================
 */
 var API_Meta = API_Meta || {};
@@ -15,13 +15,13 @@ API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
 
 const ImportHS6e = (() => {
 
-  let version = '0.913',
-  lastUpdate  = 1618165680913,
+  let version = '0.914',
+  lastUpdate  = 1618232645914,
   lastBody    = 0,
   debug_log   = 0,
   logObjs     = 0;
 
-  const checkInstall= () => {                                                       // Display version information on startup.
+  const checkInstall= () => {                                                  // Display version information on startup.
     var updated = new Date(lastUpdate);
     log('\u0EC2\u2118 [ImportHS6e v'+version+', ' + updated.getFullYear() + "/" + (updated.getMonth()+1) + "/" + updated.getDate() + "]");
   };
@@ -35,11 +35,24 @@ const ImportHS6e = (() => {
     if(debug_log!=0) {log(logval);}
   };
 
-  const createOrSetAttr = (obj_nm, attr_nm, val, cid) => {                     // Set an individual attribute if it exists, otherwise create it.
-    var objToSet = findObjs({type: 'attribute', characterid: cid, name: obj_nm})[0]
+// TODO  make removal conditional based on input flags per type of attribute
+  const removeExistingAttributes = (alst) => {                                 // Remove existing attributes from roll20 character sheet
+    for (var c=0; c < alst.length; c++)                                        // Loop character sheet atribute list
+    {
+      var attr = alst[c].get("name");                                          // Get attribute name
+      if (/^(repeating_)(skills|complications|powers|perks)/.test(attr))       // Find repeating skills, complications and powers
+      {
+        if (alst[c]!==undefined) {alst[c].remove()};                           // Remove them
+      }
+    }
+    logDebug("Existing skills and complications removed");
+  };
+
+  const createOrSetAttr = (atnm, val, cid) => {                                // Set an individual attribute if it exists, otherwise create it.
+    var objToSet = findObjs({type: 'attribute', characterid: cid, name: atnm})[0]
     if(objToSet===undefined)                                                   // If attribute does not exist, create otherwise set current value.
       {
-        createObj('attribute', {name: attr_nm, current: val, characterid: cid});
+        createObj('attribute', {name: atnm, current: val, characterid: cid});
       } else
       {
         objToSet.set("current", val);
@@ -270,11 +283,11 @@ const ImportHS6e = (() => {
     }
 
     pwdesc = pwjson.damage + " " + pwjson.type;
-    logDebug(pwdesc);
-    logDebug(pwjson.active);
-    logDebug(pwjson.end);
-    logDebug(uuid);
-    logDebug(cid);
+//    logDebug(pwdesc);
+//    logDebug(pwjson.active);
+//    logDebug(pwjson.end);
+//    logDebug(uuid);
+//    logDebug(cid);
 
     // Create the power entries.
     createObj('attribute', {name: rpnm, current: pwnm, characterid: cid});
@@ -288,6 +301,33 @@ const ImportHS6e = (() => {
     createObj('attribute', {name: rprc, current: pwjson.end, characterid: cid});
 
     return;
+  };
+
+  const createPerks = (plst, cid) => {
+    let objToSet = [],
+        pknm     = '';
+    // Create all perks
+    for (var p=0; p < plst.length; p++)                                        // Loop through HD sheet powers
+    {
+      UUID = generateUUID().replace(/_/g, "Z");                                // Generate a UUID for perk grouping
+      pknm = "repeating_perks_" + UUID + "_perk_name";
+      createOrSetAttr(pknm, plst[p].name.trim(), cid);
+    }
+  };
+
+  const createTalents = (tlst, cid) => {
+    let objToSet = [],
+        tlnm     = '';
+    // Create all talents
+    for (var t=0; t < tlst.length; t++)                                        // Loop through HD sheet powers
+    {
+      if(/^(?!Lightning R).*$/.test(tlst[t].name))                             // Exclude Lightning Reflexes (handled separately)
+      {
+        UUID = generateUUID().replace(/_/g, "Z");                              // Generate a UUID for perk grouping
+        tlnm = "repeating_perks_" + UUID + "_perk_name";
+        createOrSetAttr(tlnm, tlst[t].name.trim(), cid);
+      }
+    }
   };
 
   const generateUUID = () => {                                                 // Generate a UUID (original code by The Aaron)
@@ -398,41 +438,49 @@ const ImportHS6e = (() => {
                                .replace(/&[^;]*;/g, '')                        //   Remove &nbsp;
                                .replace(/\},\s{1,}\]/g, '\}\]');               //   Remove extra comma
 
-      let hdJSON  = JSON.parse(dec_gmnotes);                                   // Parse the decoded JSON from GM Notres field.
+      let hdJSON   = JSON.parse(dec_gmnotes),                                  // Parse the decoded JSON from GM Notes field.
+          hdchlist = hdJSON.stats,                                             // Create array of all HD Characteristics.
+          hdmvlist = hdJSON.movement,                                          // Create array of all HD Characteristics.
+          hdsklist = hdJSON.skills,                                            // Create array of all HD Skills.
+          hdcmlist = hdJSON.disads,                                            // Create array of all HD Complications.
+          hdpwlist = hdJSON.powers,                                            // Create array of all HD Powers.
+          hdpklist = hdJSON.perks,                                             // Create array of all HD Perks.
+          hdtllist = hdJSON.talents;                                           // Create array of all HD Talents.
 
-// TO DO: Create array of attributes to loop through and assign.
-// TO DO: Fix function to only need 3 inputs
-// TO DO: Add other movement types, need HD examples
-      createOrSetAttr("str_base", "str_base", hdJSON.stats.str.value, chid);
-      createOrSetAttr("dex_base", "dex_base", hdJSON.stats.dex.value, chid);
-      createOrSetAttr("con_base", "con_base", hdJSON.stats.con.value, chid);
-      createOrSetAttr("int_base", "int_base", hdJSON.stats.int.value, chid);
-      createOrSetAttr("ego_base", "ego_base", hdJSON.stats.ego.value, chid);
-      createOrSetAttr("pre_base", "pre_base", hdJSON.stats.pre.value, chid);
-      createOrSetAttr("ocv_base", "ocv_base", hdJSON.stats.ocv.value, chid);
-      createOrSetAttr("dcv_base", "dcv_base", hdJSON.stats.dcv.value, chid);
-      createOrSetAttr("omcv_base", "omcv_base", hdJSON.stats.omcv.value, chid);
-      createOrSetAttr("dmcv_base", "dmcv_base", hdJSON.stats.dmcv.value, chid);
-      createOrSetAttr("spd_base", "spd_base", hdJSON.stats.spd.value, chid);
-      createOrSetAttr("pd_base", "pd_base", hdJSON.stats.pd.value, chid);
-      createOrSetAttr("ed_base", "ed_base", hdJSON.stats.ed.value, chid);
-      createOrSetAttr("rec_base", "rec_base", hdJSON.stats.rec.value, chid);
-      createOrSetAttr("end_base", "end_base", hdJSON.stats.end.value, chid);
-      createOrSetAttr("body_base", "body_base", hdJSON.stats.body.value, chid);
-      createOrSetAttr("stun_base", "stun_base", hdJSON.stats.stun.value, chid);
-      createOrSetAttr("END", "END", hdJSON.stats.end.value, chid);
-      createOrSetAttr("BODY", "END", hdJSON.stats.body.value, chid);
-      createOrSetAttr("STUN", "STUN", hdJSON.stats.stun.value, chid);
+      for (var s=0; s < hdchlist.length; s++)                                  // Loop through HD sheet characteristics.
+      {
+		chnm = hdchlist[s].shortname + '_base';
+        createOrSetAttr(chnm, hdchlist[s].value, chid);
+        if(/^(end|body|stun)/.test(hdchlist[s].shortname))                     // Handle display values for body, end and stun.
+        {
+          chnm = hdchlist[s].shortname.toUpperCase();
+          createOrSetAttr(chnm, tlst[t].name.trim(), chid);
+        }
+      }
+
       logDebug("Stats Assigned");
 
-      createOrSetAttr("run_combat", "run_combat", hdJSON.movement.run.combat, chid);
-      createOrSetAttr("run_noncombat", "run_noncombat", hdJSON.movement.run.noncombat, chid);
-      createOrSetAttr("swim_combat", "swim_combat", hdJSON.movement.swim.combat, chid);
-      createOrSetAttr("swim_noncombat", "swim_noncombat", hdJSON.movement.swim.noncombat, chid);
-      createOrSetAttr("hleap_combat", "hleap_combat", hdJSON.movement.leap.combat, chid);
-      createOrSetAttr("hleap_noncombat", "hleap_noncombat", hdJSON.movement.leap.noncombat, chid);
-      createOrSetAttr("vleap_combat", "vleap_combat", hdJSON.movement.leap.primary.combat.value/2 + "m", chid);
-      createOrSetAttr("vleap_noncombat", "vleap_noncombat", hdJSON.movement.leap.combat, chid);
+// TODO: Add other movement types, need HD examples
+// TODO: Fix JSON structure for movement and stats
+//      for (var m=0; m < hdmvlist.length; m++)                                  // Loop through HD sheet movement.
+//      {
+//		mvnm = hdchlist[s].shortname + '_base';
+//        createOrSetAttr(chnm, hdchlist[s].value, chid);
+//        if(/^(end|body|stun)/.test(hdchlist[s].shortname))                     // Handle display values for body, end and stun.
+//        {
+//          chnm = hdchlist[s].shortname.toUpperCase();
+//          createOrSetAttr(chnm, tlst[t].name.trim(), chid);
+//        }
+//      }
+
+      createOrSetAttr("run_combat", hdJSON.movement.run.combat, chid);
+      createOrSetAttr("run_noncombat", hdJSON.movement.run.noncombat, chid);
+      createOrSetAttr("swim_combat", hdJSON.movement.swim.combat, chid);
+      createOrSetAttr("swim_noncombat", hdJSON.movement.swim.noncombat, chid);
+      createOrSetAttr("hleap_combat", hdJSON.movement.leap.combat, chid);
+      createOrSetAttr("hleap_noncombat", hdJSON.movement.leap.noncombat, chid);
+      createOrSetAttr("vleap_combat", hdJSON.movement.leap.primary.combat.value/2 + "m", chid);
+      createOrSetAttr("vleap_noncombat", hdJSON.movement.leap.combat, chid);
       logDebug("Movement Assigned");
 
 // TO DO Change the JSON template to export the characters features. Check bio, etc. as well
@@ -448,29 +496,13 @@ const ImportHS6e = (() => {
 //{"name":"weight","current":"200","max":"","_id":"-MWM-LBbkWVEVoxsB3Hb","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
 //{"name":"eyes","current":"Brown","max":"","_id":"-MWM-MBB1Ix8iKBR8wKL","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
 //{"name":"gender","current":"Male","max":"","_id":"-MWM-O_ZCwYJ05LUkp-U","_type":"attribute","_characterid":"-MWKbE-g9iyRtI8TN9_J"},
-      createOrSetAttr("name", "name", hdJSON.name, character.id);
+      createOrSetAttr("name", hdJSON.name, character.id);
 
 //        logDebug("Features Assigned");
 
-      var hdsklist = hdJSON.skills;                                            // Create array of all HD Skills.
-      var hdcmlist = hdJSON.disads;                                            // Create array of all HD Complications.
-      var hdpwlist = hdJSON.powers;                                            // Create array of all HD Complications.
-      logDebug("HD Skill Count: " + hdsklist.length);
-
-// TODO: Rename cssklist generically for all removals csrplist?
       // Create array of all attributes
-      var cssklist = findObjs({type: 'attribute', characterid: chid});
-
-// TODO  make removal conditional based on input flags per type of attribute
-      for (var c=0; c < cssklist.length; c++)                                  // Loop character sheet atribute list
-      {
-        var csskil = cssklist[c].get("name");                                  // Get attribute name
-        if (/^(repeating_)(skills|complications|powers)/.test(csskil))         // Find repeating skills, complications and powers
-        {
-          cssklist[c].remove();                                                // Remove them
-        }
-      }
-      logDebug("Existing skills and complications removed");
+      var attrlist = findObjs({type: 'attribute', characterid: chid});
+      removeExistingAttributes(attrlist);
 
       var UUID = '';
       // Create all skills
@@ -505,20 +537,21 @@ const ImportHS6e = (() => {
       logDebug("Complications Assigned");
 
 // TODO
-//        logDebug("Perks Assigned");
-//        logDebug("Talents Assigned");
 //        logDebug("Equipment Assigned");
 //        logDebug("Rolls Assigned");
 //        logDebug("Combat Levels Assigned");
 //        logDebug("Lightning Reflexes Assigned");
 
+      createPerks(hdpklist, chid);
+      logDebug("Perks Assigned");
+      createTalents(hdtllist, chid);
+      logDebug("Talents Assigned");
+
       // Create all powers
       for (var h=0; h < hdpwlist.length; h++)                                  // Loop through HD sheet powers
       {
         UUID   = generateUUID().replace(/_/g, "Z");                            // Generate a UUID for power grouping
-//          createSimplePower(pwtype, pwname, pwdesc, hdpwlist[h].active, hdpwlist[h].end, UUID, chid);
-          createSimplePower(hdpwlist[h], UUID, chid);
-//		}
+//        createSimplePower(hdpwlist[h], UUID, chid);
       }
 
       logDebug("Powers Assigned");
