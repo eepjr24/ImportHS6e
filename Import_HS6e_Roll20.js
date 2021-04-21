@@ -3,13 +3,17 @@
 Name		:	ImportHS6e
 GitHub		:	https://github.com/eepjr24/ImportHS6e
 Roll20 Contact	:	eepjr24
-Version		:	.920
-Last Update	:	4/18/2021
+Version		:	.921
+Last Update	:	4/21/2021
 =========================================================
 Updates:
-Improved skills assignment
-Added CSL
-Added PSL
+Added non default movement routine
+Fixed all movement additions to core tab movement block
+Fixed talent and perk names (JSON mod)
+various code cleanup
+Added Rivalry and Susceptibility
+Added power AP and END entries
+Added normal skill level calculations
 */
 var API_Meta = API_Meta || {};
 API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
@@ -19,8 +23,8 @@ API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
 
 const ImportHS6e = (() => {
 
-  let version = '0.920',
-  lastUpdate  = 1618788436920,
+  let version = '0.921',
+  lastUpdate  = 1619028220921,
   debug_log   = 0,                                                             // Turn on all debug settings
   logObjs     = 0,                                                             // Turn on object output to api log
   comp_log    = 0,                                                             // Turn on complications debug
@@ -28,7 +32,9 @@ const ImportHS6e = (() => {
   perk_log    = 0,                                                             // Turn on perks debug
   taln_log    = 0,                                                             // Turn on talents debug
   skil_log    = 0,                                                             // Turn on skills debug
+  sklv_log    = 0,                                                             // Turn on skill levels debug
   stat_log    = 0,                                                             // Turn on characteristics debug
+  resv_log    = 0,                                                             // Turn on reserves debug
   remv_log    = 0,                                                             // Turn on removal debug
   move_log    = 0;                                                             // Turn on movement debug
 
@@ -80,6 +86,11 @@ const ImportHS6e = (() => {
         alst[c].remove();                                                      // Remove them
         if (remv_log){logDebug(attr);}                                         // Debug removal
         break;
+      case "skilllevels":
+        //if(sklv_rem) {} TODO add removal based on flag
+        alst[c].remove();                                                      // Remove them
+        if (remv_log){logDebug(attr);}                                         // Debug removal
+        break;
       case "skills":
         //if(skil_rem) {} TODO add removal based on flag
         alst[c].remove();                                                      // Remove them
@@ -91,12 +102,17 @@ const ImportHS6e = (() => {
         if (remv_log){logDebug(attr);}                                         // Debug removal
         break;
       case "reserves":
-        //if(taln_rem) {} TODO add removal based on flag
+        //if(resv_rem) {} TODO add removal based on flag
+        alst[c].remove();                                                      // Remove them
+        if (remv_log){logDebug(attr);}                                         // Debug removal
+        break;
+      case "moves":
+        //if(move_rem) {} TODO add removal based on flag
         alst[c].remove();                                                      // Remove them
         if (remv_log){logDebug(attr);}                                         // Debug removal
         break;
       default:
-        sendChat("API", "Unhandled repeating element removal: (" + attrtype[1] + ") " + attr);
+        sendChat("i6e_API", "Unhandled repeating element removal: (" + attrtype[1] + ") " + attr);
         break;
       }
     }
@@ -113,45 +129,149 @@ const ImportHS6e = (() => {
       }
   };
 
-  const createSkill = (skl_nm, uuid, cid, incr, targ, chnm, stat, base) => {
-    let rspre = "repeating_skills_" + uuid + "_skill_",                        // Build the string prefix for skill names
-        rsnm  = rspre + "name",                                                // Build the skill name value
-        rshi  = rspre + "has_increase",                                        // Build the has increase name value
-        rshr  = rspre + "has_roll",                                            // Build the has roll name value
-        rsrs  = rspre + "roll_show",                                           // Build the roll show name value
-        rsrt  = rspre + "roll_target",                                         // Build the roll target name value
-        rsch  = rspre + "char",                                                // Build the skill characteristic name value
-        rsin  = rspre + "increase",                                            // Build the skill increase name value
-        rsrf  = rspre + "roll_formula",                                        // Build the roll formula name value
-        roll  = Number(targ.substring(0, Math.min(targ.length-1,2))),          // Convert the roll to integer
-        noch  = (chnm == "None" ? "" : chnm);
-    // Create the skill entries.
-    createOrSetAttr(rsnm, skl_nm, cid);
-    createOrSetAttr(rshr, !!roll, cid);
-    createOrSetAttr(rshi, !!incr, cid);
-    createOrSetAttr(rsin, incr, cid);
-    if(!!roll)
-    {
-	  createOrSetAttr(rsrs, targ, cid);
-	  createOrSetAttr(rsrf, "&{template:hero6template} {{charname=@{character_name}}}  {{action=@{skill_name}}}  {{roll=[[3d6]]}}  {{target=" + roll + "}} {{base=9}} {{stat= " + roll-9 + "}} {{lvls=" + incr + "}}", cid);
-	  createOrSetAttr(rsrt, roll, cid);
-	}
-    if(!(/^(GENERAL)/.test(chnm) || chnm === undefined))
-    {
-      createOrSetAttr(rsch, noch, cid);
+  const createCharacteristics = (stlst, chid) => {
+    for (const [key, value] of Object.entries(stlst)) {                        // Set the characteristics
+      let chnm = key + '_base';
+      createOrSetAttr(chnm, value.value, chid);
+      if(/^(end|body|stun)/.test(chnm))                                        // Handle display values for body, end and stun.
+      {
+        chnm = key.toUpperCase();
+        createOrSetAttr(chnm, {value}.value, chid);
+      }
+      if(!!skil_log){logDebug("Set " + chnm + " to " + value.value);}          // Log skill assignment
     }
   };
 
-// TODO implement skill levels, need HD examples
-  const createSkillLevels = (sllist, cid) => {
-    if(!!sllist)                                                               // If Skill Levels is not undefined
-    {
-//{"name":"repeating_skilllevels_-MYaEXJkPrmJn2CWBxJL_radio_skill_level","current":"1","max":"","_id":"-MYaEY52AYDipJTOKyDE","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
-//{"name":"repeating_skilllevels_-MYaEXJkPrmJn2CWBxJL_skill_level","current":"+1 All STR based skills","max":"","_id":"-MYaEnUr9G3xEEtJANKh","_type":"attribute","_characterid":"-MWz3VK0kiR8kkFcJ1V7"},
+  const createFeatures = (hdj, chid) => {
+    createOrSetAttr("height",      hdj.height,      chid);
+	createOrSetAttr("weight",      hdj.weight,      chid);
+	createOrSetAttr("hair",        hdj.hair,        chid);
+	createOrSetAttr("eyes",        hdj.eye,         chid);
+	createOrSetAttr("appearance",  hdj.appearance,  chid);
+	createOrSetAttr("background",  hdj.background,  chid);
+	createOrSetAttr("personality", hdj.personality, chid);
+	createOrSetAttr("quotes",      hdj.quote,       chid);
+	createOrSetAttr("tactics",     hdj.tactics,     chid);
+	createOrSetAttr("campaign",    hdj.campUse,     chid);
+  }
 
-    } else
+  const createSkills = (sklst, cid) => {                                       // Create all skills
+// TODO make adds conditional based on input flags per attribute type (stats, powers etc)
+// TODO look at familiarities and how they import / if they need changes.
+    for (var h=0; h < sklst.length; h++)                                       // Loop through HD sheet skills.
     {
-	  return;
+      if(sklst[h].type==="Skill Levels"){continue;}                            // Skill Levels are handled in their own routine
+      let uuid = generateUUID().replace(/_/g, "Z"),                            // Generate a UUID for skill grouping
+      rspre    = "repeating_skills_" + uuid + "_skill_",                       // Build the string prefix for skill names
+      rsnm     = rspre + "name",                                               // Build the skill name value
+      rshi     = rspre + "has_increase",                                       // Build the has increase name value
+      rshr     = rspre + "has_roll",                                           // Build the has roll name value
+      rsrs     = rspre + "roll_show",                                          // Build the roll show name value
+      rsrt     = rspre + "roll_target",                                        // Build the roll target name value
+      rsch     = rspre + "char",                                               // Build the skill characteristic name value
+      rsin     = rspre + "increase",                                           // Build the skill increase name value
+      rsrf     = rspre + "roll_formula",                                       // Build the roll formula name value
+	  hs       = sklst[h],
+      targ     = hs.roll,
+      roll     = Number(targ.substring(0, Math.min(targ.length-1,2))),         // Convert the roll to integer
+      sknm     = "",
+      incr     = hs.level,
+      noch     = (hs.char == "None" ? "" : hs.char);
+
+      switch (hs.type)
+      {
+      case "Defense Maneuver":
+        sknm = hs.name + hs.input;
+        break;
+      default:
+        sknm = hs.name.trim();
+        break;
+      }
+
+      // Create the skill entries.
+      createOrSetAttr(rsnm, sknm,   cid);
+      createOrSetAttr(rshr, !!roll, cid);
+      createOrSetAttr(rshi, !!incr, cid);
+      createOrSetAttr(rsin, incr,   cid);
+      if(!!roll)
+      {
+        createOrSetAttr(rsrs, targ, cid);
+        createOrSetAttr(rsrf, "&{template:hero6template} {{charname=@{character_name}}}  {{action=@{skill_name}}}  {{roll=[[3d6]]}}  {{target=" + roll + "}} {{base=9}} {{stat= " + roll-9 + "}} {{lvls=" + incr + "}}", cid);
+        createOrSetAttr(rsrt, roll, cid);
+      }
+      if(!(/^(GENERAL)/.test(noch) || noch === undefined))
+      {
+        createOrSetAttr(rsch, noch, cid);
+      }
+    }
+  };
+
+// TODO Check with Roll20 users to see if I need to duplicate records where level >1 in HD
+  const createSkillLevels = (sllst, cid) => {
+    for (var h=0; h < sllst.length; h++)                                       // Loop through HD sheet skills.
+    {
+      if(sllst[h].type!=="Skill Levels"){continue;}                            // Skill Levels are handled in their own routine
+      let uuid = generateUUID().replace(/_/g, "Z"),                            // Generate a UUID for skill grouping
+      rspre    = "repeating_skilllevels_" + uuid,                              // Build the string prefix for skill names
+      rsnm     = rspre + "_skill_level",                                       // Build the skill name value
+      rshi     = rspre + "_radio_skill_level";                                 // Build the level name value
+
+      createOrSetAttr(rsnm, sllst[h].name.trim(), cid);
+      createOrSetAttr(rshi, 0, cid);
+    }
+  };
+
+  const createMovement = (mlst, cid) => {
+    if(!mlst){return;}                                                       // If movement list is not undefined
+    let uuid = "";                                                           // UUID for complication grouping
+    for (const [key, value] of Object.entries(mlst)) {                       // Set the movement values
+      cmnm = key + '_combat';
+      ncnm = key + '_noncombat';
+      if(/^(leap)/.test(cmnm))                                               // Handle split for leap
+      {
+        createOrSetAttr('h' + cmnm, value.combat, cid);
+        createOrSetAttr('h' + ncnm, value.noncombat, cid);
+        createOrSetAttr('v' + cmnm, value.primary.combat.value/2 + "m", cid);
+        createOrSetAttr('v' + ncnm, value.combat, cid);
+        logDebug(cmnm);
+      } else if (/^(run|swim)/.test(cmnm))                                   // Handle run, swim (always appear)
+	  {
+        createOrSetAttr(cmnm, value.combat, cid);
+        createOrSetAttr(ncnm, value.noncombat, cid);
+        logDebug(cmnm);
+      } else                                                                 // Handle all other cases
+      {
+        switch (key)                                                         // Create the movement description based on the type
+        {
+        case "fly":
+          cmnm = "Flight";
+          if (move_log){logDebug(cmnm);}                                     // Debug movement
+          break;
+        case "swing":
+          cmnm = "Swinging";
+          if (move_log){logDebug(cmnm);}                                     // Debug movement
+          break;
+        case "teleport":
+          cmnm = "Teleportation";
+          if (move_log){logDebug(cmnm);}                                     // Debug movement
+          break;
+        case "tunnel":
+          cmnm = "Tunneling";
+          if (move_log){logDebug(cmnm);}                                     // Debug movement
+          break;
+        default:
+          sendChat("i6e_API", "Unhandled repeating element movement: (" + key + ") " + value.combat);
+          break;
+	    }
+        uuid = generateUUID().replace(/_/g, "Z");                            // Generate a UUID for complication grouping
+        mvnm = "repeating_moves_" + uuid + "_spec_move_name";                // Build the movement repeating name
+        mvcb = "repeating_moves_" + uuid + "_spec_move_combat";              // Build the combat repeating name
+        mvnc = "repeating_moves_" + uuid + "_spec_move_noncombat";           // Build the noncombat repeating name
+        createOrSetAttr(mvnm, cmnm, cid);
+        createOrSetAttr(mvcb, value.combat, cid);
+        createOrSetAttr(mvnc, value.noncombat, cid);
+        logDebug(cmnm);
+      }
     }
   };
 
@@ -168,6 +288,7 @@ const ImportHS6e = (() => {
     for (var cl=0; cl < cllst.length; cl++)                                  // Loop through combat skill levels
     {
       let hcs = cllst[cl];                                                   // Get combat skill level JSON attribute
+      logDebug(hcs.name);
       if(!(/^(Combat Skill Levels)/.test(hcs.name))){continue;}              // Only process Combat Skill Levels
 
       uuid   = generateUUID().replace(/_/g, "Z");                            // Generate a UUID for complication grouping
@@ -179,12 +300,13 @@ const ImportHS6e = (() => {
       rdmv   = "repeating_combatskills_" + uuid + "_radio_csl_dmcv";
       rdc    = "repeating_combatskills_" + uuid + "_radio_csl_dc";
       createOrSetAttr(clnm, hcs.text, cid);
-      createOrSetAttr(ccb, 0, cid);
+      createOrSetAttr(ccb,  0, cid);
       createOrSetAttr(rocv, 0, cid);
       createOrSetAttr(romv, 0, cid);
       createOrSetAttr(rdcv, 0, cid);
       createOrSetAttr(rdmv, 0, cid);
-      createOrSetAttr(rdc, 0, cid);
+      createOrSetAttr(rdc,  0, cid);
+      log(hcs.name + " Added");
     }
   };
 
@@ -207,7 +329,7 @@ const ImportHS6e = (() => {
       rdcv   = "repeating_penaltyskills_" + uuid + "_radio_psl_";
       rmod   = "repeating_penaltyskills_" + uuid + "_radio_psl_";
       createOrSetAttr(psnm, hps.text, cid);
-      createOrSetAttr(pcb, 0, cid);
+      createOrSetAttr(pcb,  0, cid);
 // TODO Use OptionID to set appropriate flags for ocv, dcv, rmod Example:SINGLEDCV
       createOrSetAttr(rocv, 0, cid);
       createOrSetAttr(rmod, 0, cid);
@@ -222,6 +344,8 @@ const ImportHS6e = (() => {
         ad1    = "",                                                           // Complication adder 1
         ad2    = "",                                                           // Complication adder 2
         ad3    = "",                                                           // Complication adder 3
+        ad4    = "",                                                           // Complication adder 4
+        ad5    = "",                                                           // Complication adder 5
         md1    = "",                                                           // Complication modifier 1
         md2    = "",                                                           // Complication modifier 2
         md3    = "",                                                           // Complication modifier 3
@@ -234,16 +358,29 @@ const ImportHS6e = (() => {
       uuid   = generateUUID().replace(/_/g, "Z");                              // Generate a UUID for complication grouping
       rcnm   = "repeating_complications_" + uuid + "_complication";            // Build the complication repeating name
       rcap   = rcnm + "_cost";
-      if (hc.adders[2]!==undefined)
-      {                                                                        // Populate all 3 adders
+      if (hc.adders[4])
+      {                                                                        // Populate 5 adders
+        ad5 = hc.adders[4].input;
+        ad4 = hc.adders[3].input;
         ad3 = hc.adders[2].input;
         ad2 = hc.adders[1].input;
         ad1 = hc.adders[0].input;
-      } else if (hc.adders[1]!==undefined)
+      } else if (hc.adders[3])
+      {                                                                        // Populate first 4 adders
+        ad4 = hc.adders[3].input;
+        ad3 = hc.adders[2].input;
+        ad2 = hc.adders[1].input;
+        ad1 = hc.adders[0].input;
+      } else if (hc.adders[2])
+      {                                                                        // Populate first 3 adders
+        ad3 = hc.adders[2].input;
+        ad2 = hc.adders[1].input;
+        ad1 = hc.adders[0].input;
+      } else if (hc.adders[1])
       {                                                                        // Populate first 2 adders
         ad2 = hc.adders[1].input;
         ad1 = hc.adders[0].input;
-      } else if (hc.adders[0]!==undefined)
+      } else if (hc.adders[0])
       {                                                                        // Populate 1st adder
         ad1 = hc.adders[0].input;
       }
@@ -279,8 +416,11 @@ const ImportHS6e = (() => {
       case "ENRAGED":                                                          // Enraged
         compnm = "Enraged: " + hc.input + ", " + ad2 + ", " + ad3 + ", " + ad1 ;
         break;
+      case "GENERICDISADVANTAGE":                                              // Custom - manually fill in
+        compnm = "Populate Custom Complication Here";
+        break;
       case "HUNTED":                                                           // Hunted
-        compnm = "Hunted: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
+        compnm = "Hunted: " + hc.input + " (" + ad1 + ", " + ad2 + ", " + ad3 + ")";
         break;
       case "PHYSICALLIMITATION":                                               // Physical Complication
         compnm = "Phys Comp: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
@@ -288,25 +428,31 @@ const ImportHS6e = (() => {
       case "PSYCHOLOGICALLIMITATION":                                          // Psychological Complication
         compnm = "Psy Comp: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
         break;
-      case "SOCIALLIMITATION":                                                 // Social Complication
-        compnm = "Soc Comp: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
+      case "RIVALRY":                                                          // Negative Reputation
+        compnm = "Rival: " + ad2 + " (" + ad1 + ", " + ad3 + ", " + ad4 + ", " + ad5;
         break;
-// TODO Add susceptibility (need HD examples)
-// TODO Check the various combinations and combine if possible.
       case "REPUTATION":                                                       // Negative Reputation
         compnm = "Neg Rep: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
         break;
+      case "SOCIALLIMITATION":                                                 // Social Complication
+        compnm = "Soc Comp: " + hc.input + ", " + ad1 + ", " + ad2 + ", " + ad3;
+        break;
+      case "SUSCEPTIBILITY":                                                   // Susceptiblity
+        compnm = "Susc: " + hc.input + "(" + ad1 + " " + ad2 + ")";
+        break;
+// TODO Check the various combinations and combine cases if possible.
       case "UNLUCK":                                                           // Unluck
         compnm = name;
         break;
-      case "VULNERABILITY":                                                    // Vulnerability to substance
+      case "VULNERABILITY":                                                    // Vulnerability
         compnm = "Vuln: " + hc.input + " - " + md1 + " (" + ad1 + ")";
         break;
       default:
-        return sendChat("API", "Unhandled complication type: " + hc.XMLID);
+        sendChat("i6e_API", "Unhandled complication type: " + hc.XMLID);
         break;
       }
 // TODO make abbreviations optional
+// TODO abbreviations for Rivalry
       compnm = compnm.replace(/[,\s]+$/g, '')                                  // Trim trailing comma and space as needed
                      .replace('Uncommon', 'Unc')                               // Abbreviate Uncommon
                      .replace('Common', 'Com')                                 // Abbreviate Common
@@ -341,6 +487,28 @@ const ImportHS6e = (() => {
         rpea   = rppre + "_power_end_ap_cost",                                 // Build the power ap end cost label
         rpes   = rppre + "_power_end_str_cost",                                // Build the power str end cost label
         rprc   = rppre + "_power_remaining_charges",                           // Build the power remaining charges / end label
+        rppe   = rppre + "_power_expand",
+        rpbp   = rppre + "_pow_base_points",
+        rpap   = rppre + "_pow_active_points",
+        rpan   = rppre + "_pow_active_points_no_reduced_end",
+        rprp   = rppre + "_pow_real_points",
+        rprl   = rppre + "_power_real_cost",
+        rpbd   = rppre + "_attack_base_dice",
+        rpbs   = rppre + "_attack_base_dice_show",
+        rpsd   = rppre + "_attack_str_dice",
+        rpss   = rppre + "_attack_str_dice_show",
+        rpse   = rppre + "_attack_str_for_end",
+        rpmd   = rppre + "_attack_maneuver_dice_show",
+        rpcd   = rppre + "_attack_csl_dice_show",
+        rped   = rppre + "_attack_extra_dice",
+        rpds   = rppre + "_attack_extra_dice_show"
+        rpad   = rppre + "_attack_dice",
+        rpas   = rppre + "_attack_dice_show",
+        rppn   = rppre + "_pow_advantages_no_reduced_end",
+        rppa   = rppre + "_pow_advantages",
+        rppl   = rppre + "_pow_limitations",
+        rpem   = rppre + "_end_multiplier",
+        rpps   = rppre + "_power_end_source",
         zero   = 0;
 
     if (hclas.attack)              {pwtype = "attack";}                        // Determine power type
@@ -366,32 +534,56 @@ const ImportHS6e = (() => {
     if (isNaN(pwjson.end))
     {
 // TODO implement powers with charges
-      sendChat("API", "Powers with charges not implemented yet: " + pwnm);
+      sendChat("i6e_API", "Powers with charges not implemented yet: " + pwnm);
       return;
-    } else if (pwtype === "attack")
-    {
-    // TODO implement attack powers
-//      sendChat("API", "Attack powers not implemented yet: " + pwnm);
-//      return;
     } else if (pwtype === "unknown")
     {
-      sendChat("API", "Power is an unknown type: " + pwnm);
+      sendChat("i6e_API", "Power is an unknown type: " + pwnm);
 //      return;
     }
     if (parseInt(pwjson.end) != parseInt(pwjson.end)) {end = 0;} else {end = pwjson.end}
     pwdesc = pwjson.desc;
-    logDebug(pwdesc);
+
     // Create the power entries.
-    createObj('attribute', {name: rpnm, current: pwnm, characterid: cid});
-    createObj('attribute', {name: rppow, current: pwdesc, characterid: cid});
-    createObj('attribute', {name: rppf, current: "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} ", characterid: cid});
-    createObj('attribute', {name: rppf2, current: "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} {{description=" + pwdesc + "}}", characterid: cid});
-    createObj('attribute', {name: rpec, current: pwjson.end, characterid: cid});
-    createObj('attribute', {name: rpea, current: end, characterid: cid});
-    createObj('attribute', {name: rpes, current: zero, characterid: cid});
-    createObj('attribute', {name: rprc, current: pwjson.end, characterid: cid});
-// TODO implement full power stack addition
-    return;
+    createOrSetAttr(rpnm, pwnm, cid);                                          // Assign the power name
+    createOrSetAttr(rppow, pwdesc, cid);                                       // Assign the power descrption
+    createOrSetAttr(rppf, "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}}", cid);
+    createOrSetAttr(rppf2, "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} {{description=" + pwdesc + "}}", cid);                                      // Assign the complication name
+    createOrSetAttr(rpec, pwjson.end, cid);                                    //
+    createOrSetAttr(rpea, end, cid);                                           //
+    createOrSetAttr(rpes, zero, cid);                                          //
+    createOrSetAttr(rprc, pwjson.end, cid);                                    //
+
+    createOrSetAttr(rppe, zero, cid);                                    //
+    createOrSetAttr(rpbp, pwjson.base, cid);                                    //
+    createOrSetAttr(rpap, pwjson.active, cid);                                    //
+    createOrSetAttr(rpan, pwjson.active, cid);                                    //
+// Create function to calc real points by looping adders
+    createOrSetAttr(rprp, pwjson.base, cid);                                    //
+    createOrSetAttr(rprl, pwjson.base, cid);                                    //
+    if (pwtype !== "attack")
+    {
+      createOrSetAttr(rpbd, "3d6+1", cid);                                    //
+      createOrSetAttr(rpbs, "3d6+1", cid);                                    //
+      createOrSetAttr(rpad, "3d6+1", cid);                                    //
+      createOrSetAttr(rpas, "3d6+1", cid);                                    //
+      createOrSetAttr(rpsd, " ", cid);                                    //
+      createOrSetAttr(rpss, " ", cid);                                    //
+      createOrSetAttr(rpmd, " ", cid);                                    //
+      createOrSetAttr(rpcd, " ", cid);                                    //
+      createOrSetAttr(rped, " ", cid);                                    //
+      createOrSetAttr(rpds, " ", cid);                                    //
+      createOrSetAttr(rpse, zero, cid);                                    //
+      createOrSetAttr(rppn, zero, cid);                                    //
+      createOrSetAttr(rppa, zero, cid);                                    //
+      createOrSetAttr(rppl, zero, cid);                                    //
+// Create Function to check for reduced End
+      createOrSetAttr(rpem, "1x END", cid);                                    //
+// Create Function to check for alternate END sources
+      createOrSetAttr(rpps, "END", cid);                                    //
+    }
+// TODO implement roll for effect powers
+// TODO implement roll dor attack and damage powers
   };
 
   const createPerks = (plst, cid) => {
@@ -401,7 +593,7 @@ const ImportHS6e = (() => {
     {
       UUID = generateUUID().replace(/_/g, "Z");                                // Generate a UUID for perk grouping
       pknm = "repeating_perks_" + UUID + "_perk_name";
-      createOrSetAttr(pknm, plst[p].name.trim(), cid);
+      createOrSetAttr(pknm, plst[p].desc.trim(), cid);
     }
   };
 
@@ -411,10 +603,9 @@ const ImportHS6e = (() => {
     // Create all talents
     for (var t=0; t < tlst.length; t++)                                        // Loop through HD sheet powers
     {
-      if(/^(Lightning R).*$/.test(tlst[t].name)){continue;}                    // Exclude Lightning Reflexes (handled separately)
       UUID = generateUUID().replace(/_/g, "Z");                                // Generate a UUID for perk grouping
       tlnm = "repeating_perks_" + UUID + "_perk_name";
-      createOrSetAttr(tlnm, tlst[t].name.trim(), cid);
+      createOrSetAttr(tlnm, tlst[t].desc.trim(), cid);
     }
   };
 
@@ -471,6 +662,7 @@ const ImportHS6e = (() => {
 	  return;
     }
 
+///////////////////////////////////////////////////////////////////////////////// Begin processing API message
     let args = msg.content.split(" ");                                         // Parse arguments
     args.splice(0, 1);                                                         // Remove !importHS6e
     while (args.length > 0) {                                                  // Loop all attributes
@@ -529,7 +721,7 @@ const ImportHS6e = (() => {
     var selected = msg.selected;
     if (selected===undefined)                                                  // Must have a token selected
     {
-      sendChat("API", "Please select a token.");
+      sendChat("i6e_API", "Please select a token.");
       return;
     }
 
@@ -538,11 +730,12 @@ const ImportHS6e = (() => {
 
     if (character===undefined)                                                 // Token must have valid character assigned.
     {
-      sendChat("API", "Token has no character assigned, please assign and retry.");
+      sendChat("i6e_API", "Token has no character assigned, please assign and retry.");
       return;
     }
 
-    let chid             = character.id;                                              // Get character identifier
+///////////////////////////////////////////////////////////////////////////////// Begin parsing character sheet
+    let chid             = character.id;                                       // Get character identifier
     let herodesignerData = [];
     let characterName    = findObjs({type: 'attribute', characterid: chid, name: 'name'})[0];
 
@@ -557,7 +750,7 @@ const ImportHS6e = (() => {
 
       if(gmnotes.length <= 5000)
       {
-	    sendChat("API", "JSON too short to contain valid character data. Update character (not token) GM Notes.");
+	    sendChat("i6e_API", "JSON too short to contain valid character data. Update character (not token) GM Notes.");
         return;
       }
 
@@ -565,7 +758,7 @@ const ImportHS6e = (() => {
           hdchlist = hdJSON.stats,                                             // Create array of all HD Characteristics.
           hdmvlist = hdJSON.movement,                                          // Create array of all HD Characteristics.
           hdsklist = hdJSON.skills,                                            // Create array of all HD Skills.
-          hdsllist = hdJSON.skilllevels,                                       // Create array of all HD Skill Levels.
+          hdsllist = hdJSON.skills     ,                                       // Create array of all HD Skill Levels.
           hdcmlist = hdJSON.disads,                                            // Create array of all HD Complications.
           hdpwlist = hdJSON.powers,                                            // Create array of all HD Powers.
           hdpklist = hdJSON.perks,                                             // Create array of all HD Perks.
@@ -573,77 +766,19 @@ const ImportHS6e = (() => {
 
 //      characterName.set("name", hdJSON.name);                                  // Set the name
 
-// TODO  make adds conditional based on input flags per attribute type (stats, powers etc)
-
-      for (const [key, value] of Object.entries(hdJSON.stats)) {               // Set the characteristics
-		chnm = key + '_base';
-        createOrSetAttr(chnm, value.value, chid);
-        if(/^(end|body|stun)/.test(chnm))                                      // Handle display values for body, end and stun.
-        {
-          chnm = key.toUpperCase();
-          createOrSetAttr(chnm, {value}.value, chid);
-        }
-        if(skil_log===1){logDebug("Set " + chnm + " to " + value.value);}
-      }
-      logDebug("*** Stats Assigned");
-
-// TODO check all different movement skills for entries here and in powers
-      for (const [key, value] of Object.entries(hdJSON.movement)) {            // Set the movement values
-		cmnm = key + '_combat';
-		ncnm = key + '_noncombat';
-		logDebug(cmnm);
-        if(/^(leap)/.test(cmnm))                                               // Handle display values for body, end and stun.
-        {
-          createOrSetAttr('h' + cmnm, value.combat, chid);
-          createOrSetAttr('h' + ncnm, value.noncombat, chid);
-          createOrSetAttr('v' + cmnm, value.primary.combat.value/2 + "m", chid);
-          createOrSetAttr('v' + ncnm, value.combat, chid);
-        } else
-	    {
-          createOrSetAttr(cmnm, value.combat, chid);
-          createOrSetAttr(ncnm, value.noncombat, chid);
-        }
-      }
-      logDebug("*** Movement Assigned");
-/*
-      createOrSetAttr("run_combat", hdJSON.movement.run.combat, chid);
-      createOrSetAttr("run_noncombat", hdJSON.movement.run.noncombat, chid);
-      createOrSetAttr("swim_combat", hdJSON.movement.swim.combat, chid);
-      createOrSetAttr("swim_noncombat", hdJSON.movement.swim.noncombat, chid);
-      createOrSetAttr("hleap_combat", hdJSON.movement.leap.combat, chid);
-      createOrSetAttr("hleap_noncombat", hdJSON.movement.leap.noncombat, chid);
-      createOrSetAttr("vleap_combat", hdJSON.movement.leap.primary.combat.value/2 + "m", chid);
-      createOrSetAttr("vleap_noncombat", hdJSON.movement.leap.combat, chid);
-*/
-      createOrSetAttr("height", hdJSON.height, chid);
-      createOrSetAttr("weight", hdJSON.weight, chid);
-      createOrSetAttr("hair", hdJSON.hair, chid);
-      createOrSetAttr("eyes", hdJSON.eye, chid);
-      createOrSetAttr("appearance", hdJSON.appearance, chid);
-      createOrSetAttr("background", hdJSON.background, chid);
-      createOrSetAttr("personality", hdJSON.personality, chid);
-      createOrSetAttr("quotes", hdJSON.quote, chid);
-      createOrSetAttr("tactics", hdJSON.tactics, chid);
-      createOrSetAttr("campaign", hdJSON.campUse, chid);
-
-      logDebug("*** Features Assigned");
-
       // Create array of all attributes
       var attrlist = findObjs({type: 'attribute', characterid: chid});
+
       removeExistingAttributes(attrlist);
-      logDebug("Existing skills and complications removed");
-
-      var UUID = '';
-      // Create all skills
-      for (var h=0; h < hdsklist.length; h++)                                  // Loop through HD sheet skills.
-      {
-        UUID = generateUUID().replace(/_/g, "Z");                              // Generate a UUID for skill grouping
-        // TO DO: Tweak characteristics to read correctly. Need good HD example.
-        // Create all entries needed for a skill
-        createSkill(hdsklist[h].name.trim(), UUID, chid, hdsklist[h].level, hdsklist[h].roll, hdsklist[h].char, 0, 0);
-      }
+      logDebug("*** Existing skills and complications removed");
+      createCharacteristics(hdJSON.stats, chid);
+      logDebug("*** Stats Assigned");
+      createFeatures(hdJSON, chid);
+      logDebug("*** Features Assigned");
+      createSkills(hdsklist, chid);
       logDebug("*** Skills Assigned");
-
+      createMovement(hdmvlist, chid);
+      logDebug("*** Movement Assigned");
       createSkillLevels(hdsllist, chid);
       logDebug("*** Skill Levels Assigned");
       createCombatLevels(hdsklist, chid);
