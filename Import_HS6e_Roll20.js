@@ -3,13 +3,19 @@
 Name:           ImportHS6e
 GitHub:         https://github.com/eepjr24/ImportHS6e
 Roll20 Contact: eepjr24
-Version:        .922
-Last Update:    5/12/2021
+Version:        1.00
+Last Update:    5/16/2021
 =========================================================
 Updates:
-Reworked power attribute setting to fix END and other values.
-Added active die cost (except for Transform).
-Fixed hit location selection on attack wizard powers.
+Fixed INT as base stat for Perception.
+Fixed combat skill level logging bug.
+Fixed combat skill level removal flag bug.
+Fixed penalty skill level removal flag bug.
+Fixed bug with empty values for endurance breaking code.
+Verified familiarities are working.
+Switched to text versus name for skill display.
+Fixed character name setting.
+
 */
 var API_Meta = API_Meta || {};
 API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
@@ -17,12 +23,12 @@ API_Meta.ImportHS6e = { offset: Number.MAX_SAFE_INTEGER, lineCount: -1 };
 try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(e.stack.split(/\n/)[1].replace(/^.*:(\d+):.*$/, '$1'), 10) - (13)); }
 }
 
-// TODO Deal with MP and VPP
+// TODO Deal with MP
 // TODO create reserves
   const ImportHS6e = (() => {
 
-  let version = '0.922',
-  lastUpdate  = 1620849676922,
+  let version = '1.00',
+  lastUpdate  = 1621211328100,
   debug_log   = 0,                                                             // Debug settings, all debug values 1=on
   logObjs     = 0,                                                             // Output character object to api log
   comp_log    = 0,                                                             // Debug complications
@@ -38,13 +44,15 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
   stat_log    = 0,                                                             // Debug characteristics
   taln_log    = 0,                                                             // Debug talents
   comp_rem    = 1,                                                             // Complications removal flag, all removal flags 1=remove
+  cskl_rem    = 1,                                                             // Combat skill levels removal flag
   powr_rem    = 1,                                                             // Powers removal flag
-  perk_rem    = 1,                                                             // Debug perks
-  taln_rem    = 1,                                                             // Talents removal flag
+  perk_rem    = 1,                                                             // Debug removal flag
+  pskl_rem    = 1,                                                             // Penalty skill level removal flag
+  resv_rem    = 1,                                                             // Reserves removal flag
   skil_rem    = 1,                                                             // Skills removal flag
   sklv_rem    = 1,                                                             // Skill levels removal flag
   stat_rem    = 1,                                                             // Characteristics removal flag
-  resv_rem    = 1,                                                             // Reserves removal flag
+  taln_rem    = 1,                                                             // Talents removal flag
   move_rem    = 1;                                                             // Movement removal flag
 
   const checkInstall= () => {                                                  // Display version information on startup.
@@ -128,7 +136,16 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
 
   const createOrSetAttr = (atnm, val, cid) => {                                // Set an individual attribute if it exists, otherwise create it.
     var objToSet = findObjs({type: 'attribute', characterid: cid, name: atnm})[0]
-    if(val===undefined){return;}
+    if(val===undefined)
+    {
+      sendChat("i6e_API", "Undefined value in set attribute: " + atnm);
+      return;
+    }
+    if(typeof objToSet === "number" && IsNaN(val))
+    {
+      sendChat("i6e_API", "Type mismatch (numeric expected) in set attribute: " + atnm);
+      return;
+    }
     if(objToSet===undefined)                                                   // If attribute does not exist, create otherwise set current value.
     {
       return createObj('attribute', {name: atnm, current: val, characterid: cid});
@@ -153,21 +170,21 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
   };
 
   const createFeatures = (hdj, chid) => {
-    createOrSetAttr("height",      hdj.height,      chid);
-    createOrSetAttr("weight",      hdj.weight,      chid);
-    createOrSetAttr("hair",        hdj.hair,        chid);
-    createOrSetAttr("eyes",        hdj.eye,         chid);
-    createOrSetAttr("appearance",  hdj.appearance,  chid);
-    createOrSetAttr("background",  hdj.background,  chid);
-    createOrSetAttr("personality", hdj.personality, chid);
-    createOrSetAttr("quotes",      hdj.quote,       chid);
-    createOrSetAttr("tactics",     hdj.tactics,     chid);
-    createOrSetAttr("campaign",    hdj.campUse,     chid);
+    //createOrSetAttr("alternate_ids", hdj.,      chid);                         // Future Placeholder
+    createOrSetAttr("player_name",   hdj.playername,  chid);
+    createOrSetAttr("height",        hdj.height,      chid);
+    createOrSetAttr("weight",        hdj.weight,      chid);
+    createOrSetAttr("hair",          hdj.hair,        chid);
+    createOrSetAttr("eyes",          hdj.eye,         chid);
+    createOrSetAttr("appearance",    hdj.appearance,  chid);
+    createOrSetAttr("background",    hdj.background,  chid);
+    createOrSetAttr("personality",   hdj.personality, chid);
+    createOrSetAttr("quotes",        hdj.quote,       chid);
+    createOrSetAttr("tactics",       hdj.tactics,     chid);
+    createOrSetAttr("campaign",      hdj.campUse,     chid);
   };
 
   const createSkills = (sklst, cid) => {                                       // Create all skills
-// TODO make adds conditional based on input flags per attribute type (stats, powers etc)
-// TODO look at familiarities and how they import / if they need changes.
     for (var h=0; h < sklst.length; h++)                                       // Loop through HD sheet skills.
     {
       if(sklst[h].type==="Skill Levels"){continue;}                            // Skill Levels are handled in their own routine
@@ -193,8 +210,10 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       case "Defense Maneuver":
         sknm = hs.name + hs.input;
         break;
+      case "Perception":
+        noch = "INT"
       default:
-        sknm = hs.name.trim();
+        sknm = hs.text.trim();
         break;
       }
 
@@ -314,9 +333,9 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       createOrSetAttr(rdcv, 0, cid);
       createOrSetAttr(rdmv, 0, cid);
       createOrSetAttr(rdc,  0, cid);
-      if(!!cslv_log){logDebug("Set " + hcs.name );}                            // Log skill level assignment
+      if(!!cskl_log){logDebug("Set " + hcs.name );}                            // Log skill level assignment
     }
-      };
+  };
 
   const createPenaltyLevels = (plst, cid) => {
     let pcb  = "",
@@ -575,8 +594,12 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
         rpatt  = rppre + "_attack_type",
         rpatk  = rppre + "_attack_killing",
         rpahl  = rppre + "_attack_hit_location",
+        rppft  = rppre + "_pow_frame_type",                                    // Power Framework type
+        rppfn  = rppre + "_pow_framework_name",                                // Power framework name
+        rppef  = rppre + "_power_end_fixed",                                   // VPP fixed END
         pwtype = pwjson.type.trim(),
         xmlid  = pwjson.XMLID,
+        pwlvl  = pwjson.level,
         lim    = 0.0,
         adv    = 0.0,
         endm   = 1,                                                            // Endurance multiplier
@@ -592,7 +615,7 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
         hl     = 0,                                                            // Power uses hit locations
         strbs  = 0;                                                            // Power uses strength as a basis
 
-    if (isNaN(pwjson.end))    {end = 0;} else {end = parseInt(pwjson.end)}
+    if (isNaN(pwjson.end) || pwjson.end==="") {end = 0;} else {end = parseInt(pwjson.end)}
     if (isNaN(pwjson.active)) {ap  = 0;} else {ap  = parseInt(pwjson.active)}
     if (isNaN(pwjson.base))   {bp  = 0;} else {bp  = parseInt(pwjson.base)}
 
@@ -610,20 +633,6 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       pwnm = pwjson.name.trim();
     }
 
-// Is this still needed?
-    if      (hclas.attack)         {pwclas = "attack";}                        // Determine power class
-    else if (hclas.mental)         {pwclas = "mental";}
-    else if (hclas.adjustment)     {pwclas = "adjustment";}
-    else if (hclas.bodyaffecting)  {pwclas = "bodyaffecting";}
-    else if (hclas.sensory)        {pwclas = "sensory";}
-    else if (hclas.move)           {pwclas = "move";}
-    else if (hclas.defense)        {pwclas = "defense";}
-    else if (hclas.compound)       {pwclas = "compound";}
-    else if (hclas.senseaffecting) {pwclas = "senseaffecting";}
-    else if (hclas.special)        {pwclas = "special";}
-    else                           {pwclas = "none";}
-//
-
     if (isNaN(pwjson.end))
     {
 // TODO implement powers with charges and reserves
@@ -637,7 +646,7 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       lim  = figurePowerMod(pwjson.modifiers, "lim");
       adv  = figurePowerMod(pwjson.modifiers, "adv");
       endm = figurePowerMod(pwjson.modifiers, "end");
-      logDebug("Lim,Adv,Endm: " + lim + ", " + adv + ", " + endm);
+      if(!!powr_log){logDebug("Lim,Adv,Endm: " + lim + ", " + adv + ", " + endm);}
     }
 
     // Calculate real points from AP and Limitations.
@@ -662,7 +671,8 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       adc   = 10;
     case "TRANSFORM":
 // TODO Figure out a way to determine Transform Severity to set Active Die Cost
-//          adc   = 6;
+      adc   = bp/pwlvl;
+      logDebug(adc);
       createOrSetAttr(rppf,  "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}}  {{base=" + ocv + "}} {{ocv=" + ocv + "}} {{attack=[[3d6]]}} {{damage=[[" + pwjson.damage + "]]}} {{type=Effect}}", cid);
       createOrSetAttr(rppf2, "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}}  {{base=" + ocv + "}} {{ocv=" + ocv + "}} {{attack=[[3d6]]}} {{damage=[[" + pwjson.damage + "]]}} {{type=Effect}} {{description=" + pwdesc + "}}", cid);
       att   = "Effect";
@@ -745,6 +755,17 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       break;
     // Handle standard description output powers
   //        case "ABSORPTION": check spelling
+    case "GENERIC_OBJECT":
+      if(pwjson.type==="Variable Power Pool")
+      {
+        createOrSetAttr(rppft, "Variable Power Pool", cid);
+        createOrSetAttr(rppfn, pwnm, cid);
+        createOrSetAttr(rppfe, "0", cid);
+      }
+/*
+{"name":"repeating_powers_-MZcTB4QZrODnr95ikiX_pow_frame_type","current":"VPP Slot","max":"","_id":"-M_fEJw5Tb3Twd5QDRfm","_type":"attribute","_characterid":"-MZs-0JF2h1Ua0e2Hv1Y"},
+{"name":"repeating_powers_-MZcTB4QZrODnr95ikiX_pow_framework_name","current":"Divine VPP","max":"","_id":"-M_fEUBbQxPhV74m0c4E","_type":"attribute","_characterid":"-MZs-0JF2h1Ua0e2Hv1Y"},
+*/
     default:
       createOrSetAttr(rppf,  "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}}", cid);
       createOrSetAttr(rppf2, "&{template:hero6template} {{charname=@{character_name}}} {{power=" + pwnm + "}} {{description=" + pwdesc + "}}", cid);                                      // Assign the complication name
@@ -753,7 +774,6 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
       wiz   = 0;
       break;
     }
-
     createOrSetAttr(rpec,  pwjson.end, cid);                                   // Endurance Cost (string)
     createOrSetAttr(rpea,  end, cid);                                          // Endurance Cost - AP (number)
     createOrSetAttr(rpes,  zero, cid);                                         // Endurance Cost - STR (number)
@@ -810,11 +830,11 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
     {
       createOrSetAttr(rpaus, strbs, cid);
       createOrSetAttr(rpaw,  "", cid);
-      if(!!adc){createOrSetAttr(rpadc, adc, cid);}
 // TODO: Figure out how to set.
 //          createOrSetAttr(rpatt, , cid);
       createOrSetAttr(rpatk, ka, cid);
       createOrSetAttr(rpac, cvtyp, cid);
+      createOrSetAttr(rpadc, adc, cid);
       if(strbs)
       {
         createOrSetAttr(rpac, cvtyp, cid);
@@ -992,13 +1012,11 @@ try { throw new Error(''); } catch (e) { API_Meta.ImportHS6e.offset = (parseInt(
           hdpklist = hdJSON.perks,                                             // Create array of all HD Perks.
           hdtllist = hdJSON.talents;                                           // Create array of all HD Talents.
 
-//  logDebug("*** JSON Parsed");
-
-//      characterName.set("name", hdJSON.name);                                  // Set the name
-
-  // Create array of all attributes
+      character.set("name", hdJSON.name);                                      // Set the name
+      // Create array of all attributes
       var attrlist = findObjs({type: 'attribute', characterid: chid});
 
+// TODO make adds conditional based on input flags per attribute type (stats, powers etc)
       removeExistingAttributes(attrlist);
       logDebug("*** Existing skills and complications removed");
       createCharacteristics(hdJSON.stats, chid);
