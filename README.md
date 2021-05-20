@@ -18,6 +18,6 @@ To import a character:
 3. Open the character sheet (as the GM), click Edit at the top right of the sheet and paste the JSON into the GM Notes field.
 4. Click Save Changes.
 5. Assign the character sheet to a token on the board and select the token (you will get an error message in chat on the next step if you don't).
-6. Switch to the Chat window and paste in !importHS6e --debug
+6. Switch to the Chat window and paste in !ImportHS6e --debug (or you can shorten it to !i6e --debug)
 7. Open the character sheet (if you closed it) 
 8. Click Edit on the character sheet then Save Changes.
